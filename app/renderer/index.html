@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Remote Desk</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="splash">
+    <div id="splash-aurora" aria-hidden="true"></div>
+    <div class="splash-text-wrapper">
+      <h1 id="splash-text-1" class="splash-text">Remote Desk</h1>
+      <h1 id="splash-text-2" class="splash-text">Kloudera Technologies</h1>
+    </div>
+  </div>
+
+  <!-- Aurora WebGL background -->
+  <div id="aurora-bg" aria-hidden="true"></div>
+
+  <div id="app-shell">
+    <header>
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <h1>Remote Desk</h1>
+      </div>
+      <div class="header-right">
+        <button id="history-btn" class="icon-btn" title="Connection History">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span>History</span>
+        </button>
+      </div>
+    </header>
+
+    <div id="history-panel" class="dropdown hidden">
+      <div class="dropdown-header">
+        <div class="dropdown-title">Recent Connections</div>
+        <button id="history-close-btn" class="dropdown-close" title="Close">&times;</button>
+      </div>
+      <div class="dropdown-divider"></div>
+      <div id="history-list"></div>
+      <div id="history-empty" class="history-empty">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+        <span>No connections yet</span>
+      </div>
+    </div>
+
+    <main>
+      <!-- Idle state: your ID + connect card -->
+      <div id="connect-view" class="view">
+        <div class="card" id="my-id-card">
+          <div class="card-label">Your device ID</div>
+          <div class="id-display">
+            <span id="my-id">......</span>
+            <button id="copy-id-btn" class="mini-btn" title="Copy ID">Copy</button>
+          </div>
+          <div class="status-line">
+            <span id="status-dot" class="status-dot"></span>
+            <span id="status-text">Connecting to server...</span>
+          </div>
+        </div>
+
+        <div class="card" id="connect-card">
+          <div class="card-label">Connect to a device</div>
+          <input id="target-id" placeholder="Enter device ID" maxlength="8" />
+          <button id="connect-btn">Connect</button>
+          <div id="log"></div>
+        </div>
+      </div>
+
+      <!-- Active session state -->
+      <div id="session-view" class="view hidden">
+        <div class="session-bar">
+          <div class="session-info">
+            <span class="status-dot live"></span>
+            <span id="session-label">Connected</span>
+          </div>
+          <button id="end-session-btn" class="danger-btn">End Session</button>
+        </div>
+        <video id="remote-video" autoplay playsinline></video>
+        <div id="host-indicator" class="host-indicator hidden">
+          <div class="pulse-ring"></div>
+          <p>Sharing your screen</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <div class="footer">
+      &copy; 2026 Kloudera Technologies. All rights reserved.
+    </div>
+  </div>
+
+  <script src="aurora.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
