@@ -1,15 +1,81 @@
-// Signaling server: matches two peers by device ID and relays
-// WebRTC offer/answer/ICE messages between them. It never sees
-// screen content — only connection metadata.
+// Signaling server: matches two peers by device ID and relays WebRTC
+// offer/answer/ICE messages between them (never sees screen content).
+// Also exposes HTTP licensing endpoints on the same port, since Render's
+// free tier only exposes one port per service.
 
+const http = require('http');
 const WebSocket = require('ws');
 const { randomUUID } = require('crypto');
+const licensing = require('./licensing');
 
 const PORT = process.env.PORT || 8080;
-const wss = new WebSocket.Server({ port: PORT });
 
-// deviceId -> ws connection
-const peers = new Map();
+function sendJson(res, status, body) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, x-admin-key',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  });
+  res.end(JSON.stringify(body));
+}
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    let data = '';
+    req.on('data', (chunk) => (data += chunk));
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(data || '{}'));
+      } catch {
+        resolve({});
+      }
+    });
+  });
+}
+
+// ---------- HTTP server: health check + licensing API ----------
+const httpServer = http.createServer(async (req, res) => {
+  if (req.method === 'OPTIONS') {
+    sendJson(res, 204, {});
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/') {
+    sendJson(res, 200, { status: 'ok', message: 'Signaling server is running' });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/activate') {
+    const { key, deviceId } = await readBody(req);
+    if (!key || !deviceId) return sendJson(res, 400, { valid: false, reason: 'Missing key or deviceId' });
+    return sendJson(res, 200, licensing.activate(key, deviceId));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/verify') {
+    const { key, deviceId } = await readBody(req);
+    if (!key || !deviceId) return sendJson(res, 400, { valid: false, reason: 'Missing key or deviceId' });
+    return sendJson(res, 200, licensing.verify(key, deviceId));
+  }
+
+  // Admin-only: generate a new key after a sale. Protected by a secret
+  // header so random visitors can't mint their own keys.
+  if (req.method === 'POST' && req.url === '/api/generate-key') {
+    if (req.headers['x-admin-key'] !== licensing.ADMIN_SECRET) {
+      return sendJson(res, 401, { error: 'Unauthorized' });
+    }
+    const { maxActivations, expiresAt } = await readBody(req);
+    const key = licensing.createKey(maxActivations || 2, expiresAt || null);
+    return sendJson(res, 200, { key });
+  }
+
+  sendJson(res, 404, { error: 'Not found' });
+});
+
+// ---------- WebSocket server: signaling (attached to the same HTTP server) ----------
+const wss = new WebSocket.Server({ server: httpServer });
+
+const peers = new Map(); // deviceId -> ws connection
 
 function send(ws, obj) {
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -18,7 +84,6 @@ function send(ws, obj) {
 }
 
 function newDeviceId() {
-  // 8-character human-friendly ID, e.g. "A1B2C3D4"
   return randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
 }
 
@@ -64,8 +129,6 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      // Relays WebRTC SDP offers/answers and ICE candidates between
-      // two already-paired peers.
       case 'signal': {
         const target = peers.get(msg.targetId);
         send(target, { type: 'signal', fromId: myId, payload: msg.payload });
@@ -85,4 +148,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-console.log(`Signaling server running on ws://localhost:${PORT}`);
+httpServer.listen(PORT, () => {
+  console.log(`Signaling + licensing server running on port ${PORT}`);
+});
