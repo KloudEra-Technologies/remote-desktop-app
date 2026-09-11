@@ -1,5 +1,48 @@
 const { app, BrowserWindow, desktopCapturer, ipcMain, session } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+
+// Use https:// here (not wss://) — this is a plain HTTP API on the same server.
+const LICENSE_API_URL = 'https://signaling-server-rzbl.onrender.com';
+
+const LICENSE_FILE = path.join(app.getPath('userData'), 'license.json');
+const MACHINE_ID_FILE = path.join(app.getPath('userData'), 'machine-id.txt');
+
+// A persistent per-install identifier, separate from the random per-session
+// device ID used for pairing. This is what a license key gets bound to.
+function getMachineId() {
+  try {
+    return fs.readFileSync(MACHINE_ID_FILE, 'utf8').trim();
+  } catch {
+    const id = crypto.randomUUID();
+    fs.mkdirSync(path.dirname(MACHINE_ID_FILE), { recursive: true });
+    fs.writeFileSync(MACHINE_ID_FILE, id);
+    return id;
+  }
+}
+
+function readStoredLicense() {
+  try {
+    return JSON.parse(fs.readFileSync(LICENSE_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredLicense(data) {
+  fs.mkdirSync(path.dirname(LICENSE_FILE), { recursive: true });
+  fs.writeFileSync(LICENSE_FILE, JSON.stringify(data));
+}
+
+async function callLicenseApi(endpoint, body) {
+  const res = await fetch(`${LICENSE_API_URL}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
 
 // nut-js does native input injection (mouse/keyboard). It's actively
 // maintained and ships prebuilt binaries for common platforms, so it
@@ -35,7 +78,28 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  const stored = readStoredLicense();
+  if (stored && stored.key) {
+    win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    // Re-verify quietly in the background; only matters if the server
+    // explicitly says the key is no longer valid (revoked/expired).
+    callLicenseApi('/api/verify', { key: stored.key, deviceId: getMachineId() })
+      .then((result) => {
+        if (!result.valid) {
+          writeStoredLicense(null);
+          win.loadFile(path.join(__dirname, 'renderer', 'activation.html'));
+        }
+      })
+      .catch(() => {
+        // Offline or server unreachable — don't lock the user out just
+        // for that; they already activated successfully once before.
+      });
+  } else {
+    win.loadFile(path.join(__dirname, 'renderer', 'activation.html'));
+  }
+
+  return win;
 }
 
 app.whenReady().then(() => {
@@ -85,5 +149,21 @@ ipcMain.on('inject-key', async (e, { key, modifiers }) => {
     for (const m of modKeys) await keyboard.releaseKey(m);
   } catch (err) {
     // Unsupported key — ignore rather than crash the session.
+  }
+});
+
+// ---- IPC: license activation ----
+ipcMain.handle('activate-license', async (e, { licenseKey }) => {
+  try {
+    const deviceId = getMachineId();
+    const result = await callLicenseApi('/api/activate', { key: licenseKey, deviceId });
+    if (result.valid) {
+      writeStoredLicense({ key: licenseKey });
+      const win = BrowserWindow.fromWebContents(e.sender);
+      win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    }
+    return result;
+  } catch (err) {
+    return { valid: false, reason: 'Could not reach the license server. Check your internet connection.' };
   }
 });

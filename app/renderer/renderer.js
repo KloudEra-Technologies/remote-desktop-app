@@ -285,39 +285,10 @@ function requestConnect(targetId) {
 
 // ---------- UI wiring ----------
 document.addEventListener('DOMContentLoaded', async () => {
-  // Initialise Aurora on the splash screen
-  const splashAuroraCtn = document.getElementById('splash-aurora');
-  let splashAurora = null;
-  if (splashAuroraCtn && typeof initAurora === 'function') {
-    splashAurora = initAurora(splashAuroraCtn, {
-      colorStops: ['#3A29FF', '#7c4fff', '#5227FF'],
-      blend: 0.6,
-      amplitude: 1.2,
-      speed: 0.4,
-    });
-  }
-
   // Remove the splash screen from the DOM once its fade-out finishes.
   const splash = document.getElementById('splash');
   if (splash) {
-    splash.addEventListener('animationend', (e) => {
-      // Prevent bubbling from children's animations (e.g. text/aurora) 
-      if (e.target !== splash) return;
-      
-      if (splashAurora) splashAurora.destroy();
-      splash.remove();
-    });
-  }
-
-  // Initialise Aurora WebGL background (main page)
-  const auroraCtn = document.getElementById('aurora-bg');
-  if (auroraCtn && typeof initAurora === 'function') {
-    initAurora(auroraCtn, {
-      colorStops: ['#3A29FF', '#7c4fff', '#5227FF'],
-      blend: 0.5,
-      amplitude: 1.0,
-      speed: 0.5,
-    });
+    splash.addEventListener('animationend', () => splash.remove());
   }
 
   renderHistory();
@@ -340,13 +311,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('history-btn').addEventListener('click', () => {
     document.getElementById('history-panel').classList.toggle('hidden');
   });
-
-  const historyCloseBtn = document.getElementById('history-close-btn');
-  if (historyCloseBtn) {
-    historyCloseBtn.addEventListener('click', () => {
-      document.getElementById('history-panel').classList.add('hidden');
-    });
-  }
 
   document.addEventListener('click', (e) => {
     const panel = document.getElementById('history-panel');

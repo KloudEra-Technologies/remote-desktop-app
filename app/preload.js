@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('hostAPI', {
   injectMouseClick: (button) => ipcRenderer.send('inject-mouse-click', { button }),
   injectMouseScroll: (dx, dy) => ipcRenderer.send('inject-mouse-scroll', { dx, dy }),
   injectKey: (key, modifiers) => ipcRenderer.send('inject-key', { key, modifiers }),
+  activateLicense: (licenseKey) => ipcRenderer.invoke('activate-license', { licenseKey }),
 });

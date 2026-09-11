@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Remote Desk — Activation</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* Small additions specific to the activation screen only —
+       everything else is inherited from styles.css to match the app. */
+    body { overflow: auto; }
+    #activation-shell {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #activation-card {
+      width: 380px;
+    }
+    #activation-card .card-label { margin-bottom: 6px; }
+    #activation-title {
+      font-family: 'Poppins', -apple-system, Segoe UI, Roboto, sans-serif;
+      font-weight: 700;
+      font-size: 22px;
+      margin: 0 0 6px;
+    }
+    #activation-sub {
+      font-size: 13px;
+      color: #9aa5c0;
+      margin: 0 0 22px;
+    }
+    #license-input {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 14px;
+      border-radius: 10px;
+      border: 1px solid #2c3550;
+      background: #0f1420;
+      color: #fff;
+      font-size: 15px;
+      text-align: center;
+      letter-spacing: 2px;
+      font-family: monospace;
+      text-transform: uppercase;
+    }
+    #license-input:focus { outline: none; border-color: #4f7cff; }
+    #activate-btn {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: none;
+      background: #4f7cff;
+      color: white;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    #activate-btn:hover { background: #6a90ff; }
+    #activate-btn:disabled { opacity: 0.6; cursor: default; }
+    #activation-msg {
+      margin-top: 14px;
+      font-size: 13px;
+      text-align: center;
+      min-height: 18px;
+      color: #ff8fa3;
+    }
+    #activation-msg.success { color: #4fd18b; }
+  </style>
+</head>
+<body>
+  <div id="aurora-bg" aria-hidden="true"></div>
+
+  <div id="activation-shell">
+    <div class="card" id="activation-card" style="opacity: 1; transform: none; position: relative; z-index: 1;">
+      <h1 id="activation-title">Activate Remote Desk</h1>
+      <p id="activation-sub">Enter your license key to continue.</p>
+
+      <input id="license-input" placeholder="XXXX-XXXX-XXXX-XXXX" maxlength="19" />
+      <button id="activate-btn">Activate</button>
+
+      <div id="activation-msg"></div>
+    </div>
+  </div>
+
+  <script src="activation.js"></script>
+  <script type="module" src="aurora-init.js"></script>
+</body>
+</html>

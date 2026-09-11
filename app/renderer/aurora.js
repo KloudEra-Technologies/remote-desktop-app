@@ -1,17 +1,15 @@
-/**
- * Aurora Background Effect — Vanilla JS (WebGL2)
- * Ported from React Bits' Aurora component.
- * Uses raw WebGL2 instead of ogl so no npm dependency is needed.
- */
+// Vanilla-JS adaptation of the React Bits Aurora component, using the
+// vendored ogl library directly (pure ESM, no bundler needed).
+import { Renderer, Program, Mesh, Color, Triangle } from './vendor/ogl/index.js';
 
-const AURORA_VERT = `#version 300 es
+const VERT = `#version 300 es
 in vec2 position;
 void main() {
   gl_Position = vec4(position, 0.0, 1.0);
 }
 `;
 
-const AURORA_FRAG = `#version 300 es
+const FRAG = `#version 300 es
 precision highp float;
 
 uniform float uTime;
@@ -19,6 +17,7 @@ uniform float uAmplitude;
 uniform vec3 uColorStops[3];
 uniform vec2 uResolution;
 uniform float uBlend;
+uniform float uLightMode;
 
 out vec4 fragColor;
 
@@ -71,18 +70,18 @@ struct ColorStop {
   float position;
 };
 
-#define COLOR_RAMP(colors, factor, finalColor) {              \\
-  int index = 0;                                            \\
-  for (int i = 0; i < 2; i++) {                               \\
-     ColorStop currentColor = colors[i];                    \\
-     bool isInBetween = currentColor.position <= factor;    \\
-     index = int(mix(float(index), float(i), float(isInBetween))); \\
-  }                                                         \\
-  ColorStop currentColor = colors[index];                   \\
-  ColorStop nextColor = colors[index + 1];                  \\
-  float range = nextColor.position - currentColor.position; \\
-  float lerpFactor = (factor - currentColor.position) / range; \\
-  finalColor = mix(currentColor.color, nextColor.color, lerpFactor); \\
+#define COLOR_RAMP(colors, factor, finalColor) {              \
+  int index = 0;                                            \
+  for (int i = 0; i < 2; i++) {                               \
+     ColorStop currentColor = colors[i];                    \
+     bool isInBetween = currentColor.position <= factor;    \
+     index = int(mix(float(index), float(i), float(isInBetween))); \
+  }                                                         \
+  ColorStop currentColor = colors[index];                   \
+  ColorStop nextColor = colors[index + 1];                  \
+  float range = nextColor.position - currentColor.position; \
+  float lerpFactor = (factor - currentColor.position) / range; \
+  finalColor = mix(currentColor.color, nextColor.color, lerpFactor); \
 }
 
 void main() {
@@ -106,132 +105,87 @@ void main() {
 
   vec3 auroraColor = intensity * rampColor;
 
-  // Dark mode output (blends over dark background)
-  fragColor = vec4(auroraColor * auroraAlpha, auroraAlpha);
+  if (uLightMode > 0.5) {
+    float energy = clamp(max(intensity, 0.0), 0.0, 1.0);
+    float coverage = clamp(auroraAlpha * (0.55 + 0.45 * energy), 0.0, 0.86);
+    vec3 chroma = pow(clamp(rampColor, 0.0, 1.0), vec3(1.2));
+    float chromaPeak = max(chroma.r, max(chroma.g, chroma.b));
+    chroma /= max(chromaPeak, 0.0001);
+    fragColor = vec4(mix(vec3(1.0), chroma, min(coverage * 1.08, 0.94)), 1.0);
+  } else {
+    fragColor = vec4(auroraColor * auroraAlpha, auroraAlpha);
+  }
 }
 `;
 
 /**
- * Parse a hex color string to [r, g, b] in 0–1 range.
+ * Mounts an animated Aurora WebGL background inside `container`.
+ * Returns a destroy() function to clean it up if needed.
  */
-function hexToGL(hex) {
-  hex = hex.replace('#', '');
-  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
-  const r = parseInt(hex.substring(0, 2), 16) / 255;
-  const g = parseInt(hex.substring(2, 4), 16) / 255;
-  const b = parseInt(hex.substring(4, 6), 16) / 255;
-  return [r, g, b];
-}
-
-function compileShader(gl, type, src) {
-  const shader = gl.createShader(type);
-  gl.shaderSource(shader, src);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    console.error('Shader compile error:', gl.getShaderInfoLog(shader));
-    gl.deleteShader(shader);
-    return null;
-  }
-  return shader;
-}
-
-function createProgram(gl, vert, frag) {
-  const vs = compileShader(gl, gl.VERTEX_SHADER, vert);
-  const fs = compileShader(gl, gl.FRAGMENT_SHADER, frag);
-  const prog = gl.createProgram();
-  gl.attachShader(prog, vs);
-  gl.attachShader(prog, fs);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    console.error('Program link error:', gl.getProgramInfoLog(prog));
-    return null;
-  }
-  return prog;
-}
-
-/**
- * Initialise the Aurora effect inside `container`.
- * @param {HTMLElement} container – the DOM element to fill
- * @param {object} [opts]
- * @param {string[]} [opts.colorStops] – three hex colours
- * @param {number}   [opts.speed]      – animation speed multiplier
- * @param {number}   [opts.blend]      – blend factor
- * @param {number}   [opts.amplitude]  – wave amplitude
- * @returns {{ destroy: () => void }} cleanup handle
- */
-function initAurora(container, opts = {}) {
+export function initAurora(container, options = {}) {
   const {
-    colorStops = ['#3A29FF', '#FF94B4', '#FF3232'],
-    speed = 0.5,
-    blend = 0.5,
-    amplitude = 1.0,
-  } = opts;
+    colorStops = ['#3A29FF', '#7c5cff', '#4f7cff'],
+    amplitude = 1.1,
+    blend = 0.55,
+    speed = 0.4,
+    lightMode = false,
+  } = options;
 
-  const canvas = document.createElement('canvas');
-  canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;';
-  container.appendChild(canvas);
-
-  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: true });
-  if (!gl) { console.error('WebGL2 not supported'); return { destroy() {} }; }
-
+  const renderer = new Renderer({ alpha: true, premultipliedAlpha: true, antialias: true });
+  const gl = renderer.gl;
   gl.clearColor(0, 0, 0, 0);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.canvas.style.backgroundColor = 'transparent';
 
-  const program = createProgram(gl, AURORA_VERT, AURORA_FRAG);
-  gl.useProgram(program);
-
-  // Full-screen triangle (covers clip-space without needing a quad)
-  const verts = new Float32Array([-1, -1, 3, -1, -1, 3]);
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
-  const aPos = gl.getAttribLocation(program, 'position');
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
-  // Uniform locations
-  const uTime       = gl.getUniformLocation(program, 'uTime');
-  const uAmplitude  = gl.getUniformLocation(program, 'uAmplitude');
-  const uBlend      = gl.getUniformLocation(program, 'uBlend');
-  const uResolution = gl.getUniformLocation(program, 'uResolution');
-  const uColorStops = [];
-  for (let i = 0; i < 3; i++) uColorStops.push(gl.getUniformLocation(program, `uColorStops[${i}]`));
-
-  // Set static-ish uniforms
-  gl.uniform1f(uAmplitude, amplitude);
-  gl.uniform1f(uBlend, blend);
-  for (let i = 0; i < 3; i++) {
-    const c = hexToGL(colorStops[i] || '#000000');
-    gl.uniform3f(uColorStops[i], c[0], c[1], c[2]);
-  }
+  let program;
 
   function resize() {
-    const w = container.offsetWidth * devicePixelRatio;
-    const h = container.offsetHeight * devicePixelRatio;
-    canvas.width = w;
-    canvas.height = h;
-    gl.viewport(0, 0, w, h);
-    gl.uniform2f(uResolution, w, h);
+    const width = container.offsetWidth;
+    const height = container.offsetHeight;
+    renderer.setSize(width, height);
+    if (program) program.uniforms.uResolution.value = [width, height];
   }
-  resize();
   window.addEventListener('resize', resize);
 
-  let rafId = 0;
-  function frame(t) {
-    rafId = requestAnimationFrame(frame);
-    gl.uniform1f(uTime, t * 0.01 * speed * 0.1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
-  rafId = requestAnimationFrame(frame);
+  const geometry = new Triangle(gl);
+  if (geometry.attributes.uv) delete geometry.attributes.uv;
 
-  return {
-    destroy() {
-      cancelAnimationFrame(rafId);
-      window.removeEventListener('resize', resize);
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
-      canvas.remove();
+  const colorStopsArray = colorStops.map((hex) => {
+    const c = new Color(hex);
+    return [c.r, c.g, c.b];
+  });
+
+  program = new Program(gl, {
+    vertex: VERT,
+    fragment: FRAG,
+    uniforms: {
+      uTime: { value: 0 },
+      uAmplitude: { value: amplitude },
+      uColorStops: { value: colorStopsArray },
+      uResolution: { value: [container.offsetWidth, container.offsetHeight] },
+      uBlend: { value: blend },
+      uLightMode: { value: lightMode ? 1 : 0 },
     },
+  });
+
+  const mesh = new Mesh(gl, { geometry, program });
+  container.appendChild(gl.canvas);
+
+  let animateId = 0;
+  const update = (t) => {
+    animateId = requestAnimationFrame(update);
+    const time = t * 0.01;
+    program.uniforms.uTime.value = time * speed * 0.1;
+    renderer.render({ scene: mesh });
+  };
+  animateId = requestAnimationFrame(update);
+  resize();
+
+  return function destroy() {
+    cancelAnimationFrame(animateId);
+    window.removeEventListener('resize', resize);
+    if (gl.canvas.parentNode === container) container.removeChild(gl.canvas);
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
   };
 }
