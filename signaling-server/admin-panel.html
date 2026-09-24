@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Remote Desk — License Admin</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0b0e17;
+    color: #e8ecf4;
+    padding: 32px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #9aa5c0; font-size: 13px; margin-bottom: 24px; }
+  .card {
+    background: #12182a;
+    border: 1px solid #232b40;
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  label { display: block; font-size: 12px; color: #9aa5c0; margin-bottom: 6px; }
+  input {
+    background: #0b0e17;
+    border: 1px solid #2c3550;
+    border-radius: 8px;
+    padding: 9px 12px;
+    color: #fff;
+    font-size: 14px;
+    font-family: monospace;
+  }
+  input:focus { outline: none; border-color: #4f7cff; }
+  button {
+    background: linear-gradient(90deg, #7c5cff, #4f7cff);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    color: #fff;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: #1c2438;
+    border: 1px solid #2c3550;
+  }
+  button.danger {
+    background: #3a1f27;
+    border: 1px solid #7a2e3d;
+    color: #ff8fa3;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #connect-bar input { width: 320px; }
+  #status { font-size: 12px; margin-top: 8px; }
+  #status.ok { color: #4fd18b; }
+  #status.err { color: #ff8fa3; }
+  #new-key-result {
+    margin-top: 14px;
+    font-family: monospace;
+    font-size: 18px;
+    letter-spacing: 2px;
+    background: #0b0e17;
+    border: 1px solid #2c3550;
+    border-radius: 8px;
+    padding: 12px 16px;
+    display: none;
+  }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { text-align: left; padding: 10px; font-size: 13px; border-bottom: 1px solid #232b40; }
+  th { color: #9aa5c0; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  .key-cell { font-family: monospace; letter-spacing: 1px; }
+  .usage-bar {
+    display: inline-block;
+    width: 60px;
+    height: 5px;
+    background: #232b40;
+    border-radius: 3px;
+    overflow: hidden;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .usage-fill { height: 100%; background: #4f7cff; }
+  .device-row td { background: #0e1322; font-size: 12px; color: #cdd6ee; }
+  .device-row .ip { font-family: monospace; }
+  .expand-btn { cursor: pointer; color: #4f7cff; font-size: 12px; background: none; border: none; padding: 0; }
+  .hidden { display: none; }
+  .small-btn { padding: 5px 10px; font-size: 11px; }
+  .edit-max { width: 70px; }
+</style>
+</head>
+<body>
+
+<h1>Remote Desk — License Admin</h1>
+<div class="sub">Generate and manage license keys for your signaling server.</div>
+
+<div class="card" id="connect-bar">
+  <div class="row">
+    <div>
+      <label>Server URL</label>
+      <input id="server-url" placeholder="https://your-server.onrender.com" />
+    </div>
+    <div>
+      <label>Admin Secret</label>
+      <input id="admin-secret" type="password" placeholder="ADMIN_SECRET" />
+    </div>
+    <button id="connect-btn">Connect</button>
+  </div>
+  <div id="status"></div>
+</div>
+
+<div class="card hidden" id="generate-card">
+  <div class="row">
+    <div>
+      <label>Max devices (1–500)</label>
+      <input id="max-devices" type="number" min="1" max="500" value="2" style="width: 90px" />
+    </div>
+    <div>
+      <label>Label (optional — e.g. company name)</label>
+      <input id="key-label" placeholder="Acme Corp" style="width: 220px" />
+    </div>
+    <div>
+      <label>Expires (optional)</label>
+      <input id="key-expiry" type="date" />
+    </div>
+    <button id="generate-btn">Generate Key</button>
+  </div>
+  <div id="new-key-result"></div>
+</div>
+
+<div class="card hidden" id="keys-card">
+  <div class="row" style="justify-content: space-between; margin-bottom: 4px;">
+    <strong style="font-size: 14px;">Issued keys</strong>
+    <button class="secondary small-btn" id="refresh-btn">Refresh</button>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th>Key</th>
+        <th>Label</th>
+        <th>Devices</th>
+        <th>Expires</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="keys-tbody"></tbody>
+  </table>
+</div>
+
+<script>
+let serverUrl = localStorage.getItem('rd-admin-url') || '';
+let adminSecret = localStorage.getItem('rd-admin-secret') || '';
+
+document.getElementById('server-url').value = serverUrl;
+document.getElementById('admin-secret').value = adminSecret;
+
+function setStatus(msg, ok) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = ok ? 'ok' : 'err';
+}
+
+async function apiCall(path, opts = {}) {
+  const res = await fetch(serverUrl.replace(/\/$/, '') + path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-key': adminSecret,
+      ...(opts.headers || {}),
+    },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || data.reason || 'Request failed');
+  return data;
+}
+
+document.getElementById('connect-btn').addEventListener('click', async () => {
+  serverUrl = document.getElementById('server-url').value.trim();
+  adminSecret = document.getElementById('admin-secret').value.trim();
+  if (!serverUrl || !adminSecret) {
+    setStatus('Enter both a server URL and admin secret.', false);
+    return;
+  }
+  try {
+    await apiCall('/api/keys');
+    localStorage.setItem('rd-admin-url', serverUrl);
+    localStorage.setItem('rd-admin-secret', adminSecret);
+    setStatus('Connected.', true);
+    document.getElementById('generate-card').classList.remove('hidden');
+    document.getElementById('keys-card').classList.remove('hidden');
+    loadKeys();
+  } catch (err) {
+    setStatus('Failed to connect: ' + err.message, false);
+  }
+});
+
+document.getElementById('generate-btn').addEventListener('click', async () => {
+  const maxActivations = parseInt(document.getElementById('max-devices').value, 10) || 1;
+  const label = document.getElementById('key-label').value.trim();
+  const expiryDate = document.getElementById('key-expiry').value;
+  const expiresAt = expiryDate ? new Date(expiryDate).getTime() : null;
+
+  try {
+    const data = await apiCall('/api/generate-key', {
+      method: 'POST',
+      body: JSON.stringify({ maxActivations, label, expiresAt }),
+    });
+    const box = document.getElementById('new-key-result');
+    box.textContent = data.key;
+    box.style.display = 'block';
+    loadKeys();
+  } catch (err) {
+    alert('Failed to generate key: ' + err.message);
+  }
+});
+
+document.getElementById('refresh-btn').addEventListener('click', loadKeys);
+
+async function loadKeys() {
+  try {
+    const data = await apiCall('/api/keys');
+    renderKeys(data.keys.sort((a, b) => b.createdAt - a.createdAt));
+  } catch (err) {
+    setStatus('Failed to load keys: ' + err.message, false);
+  }
+}
+
+function fmtDate(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleDateString();
+}
+
+function renderKeys(keys) {
+  const tbody = document.getElementById('keys-tbody');
+  tbody.innerHTML = '';
+
+  keys.forEach((k) => {
+    const used = k.activations.length;
+    const pct = Math.min(100, (used / k.maxActivations) * 100);
+
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td><button class="expand-btn" data-key="${k.key}">▸</button></td>
+      <td class="key-cell">${k.key}</td>
+      <td>${k.label || '—'}</td>
+      <td>
+        ${used} / <input class="edit-max" type="number" min="1" max="500" value="${k.maxActivations}" data-key="${k.key}" />
+        <span class="usage-bar"><span class="usage-fill" style="width:${pct}%"></span></span>
+      </td>
+      <td>${fmtDate(k.expiresAt)}</td>
+      <td>${fmtDate(k.createdAt)}</td>
+      <td><button class="danger small-btn" data-delete="${k.key}">Delete</button></td>
+    `;
+    tbody.appendChild(row);
+
+    const deviceRow = document.createElement('tr');
+    deviceRow.className = 'device-row hidden';
+    deviceRow.dataset.forKey = k.key;
+    const deviceRows = k.activations.length
+      ? k.activations.map((a) => `
+          <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #1c2438;">
+            <span>Device: <code>${a.deviceId}</code></span>
+            <span class="ip">IP: ${a.ip || 'unknown'}</span>
+            <span>Activated: ${fmtDate(a.activatedAt)}</span>
+            <button class="danger small-btn" data-revoke-key="${k.key}" data-revoke-device="${a.deviceId}">Revoke</button>
+          </div>
+        `).join('')
+      : '<div style="color:#7c88ab;">No devices activated yet.</div>';
+    deviceRow.innerHTML = `<td colspan="7">${deviceRows}</td>`;
+    tbody.appendChild(deviceRow);
+  });
+
+  tbody.querySelectorAll('.expand-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.key;
+      const row = tbody.querySelector(`.device-row[data-for-key="${key}"]`);
+      row.classList.toggle('hidden');
+      btn.textContent = row.classList.contains('hidden') ? '▸' : '▾';
+    });
+  });
+
+  tbody.querySelectorAll('.edit-max').forEach((input) => {
+    input.addEventListener('change', async () => {
+      const key = input.dataset.key;
+      const maxActivations = parseInt(input.value, 10) || 1;
+      try {
+        await apiCall('/api/edit-key', {
+          method: 'POST',
+          body: JSON.stringify({ key, maxActivations }),
+        });
+        loadKeys();
+      } catch (err) {
+        alert('Failed to update: ' + err.message);
+      }
+    });
+  });
+
+  tbody.querySelectorAll('[data-revoke-key]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.revokeKey;
+      const deviceId = btn.dataset.revokeDevice;
+      if (!confirm(`Revoke device ${deviceId} from this key?`)) return;
+      try {
+        await apiCall('/api/revoke-device', {
+          method: 'POST',
+          body: JSON.stringify({ key, deviceId }),
+        });
+        loadKeys();
+      } catch (err) {
+        alert('Failed to revoke: ' + err.message);
+      }
+    });
+  });
+
+  tbody.querySelectorAll('[data-delete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.delete;
+      if (!confirm(`Delete key ${key} entirely? This cannot be undone.`)) return;
+      try {
+        await apiCall('/api/delete-key', {
+          method: 'POST',
+          body: JSON.stringify({ key }),
+        });
+        loadKeys();
+      } catch (err) {
+        alert('Failed to delete: ' + err.message);
+      }
+    });
+  });
+}
+
+// Auto-connect if we have saved credentials
+if (serverUrl && adminSecret) {
+  document.getElementById('connect-btn').click();
+}
+</script>
+</body>
+</html>

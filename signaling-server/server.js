@@ -4,6 +4,8 @@
 // free tier only exposes one port per service.
 
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const WebSocket = require('ws');
 const { randomUUID } = require('crypto');
 const licensing = require('./licensing');
@@ -15,7 +17,7 @@ function sendJson(res, status, body) {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, x-admin-key',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   });
   res.end(JSON.stringify(body));
 }
@@ -34,7 +36,19 @@ function readBody(req) {
   });
 }
 
-// ---------- HTTP server: health check + licensing API ----------
+// Render (and most hosts) sit behind a proxy, so the real client IP is in
+// x-forwarded-for, not the raw socket address.
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return req.socket.remoteAddress;
+}
+
+function isAdmin(req) {
+  return req.headers['x-admin-key'] === licensing.ADMIN_SECRET;
+}
+
+// ---------- HTTP server: health check + licensing API + admin panel ----------
 const httpServer = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     sendJson(res, 204, {});
@@ -46,27 +60,60 @@ const httpServer = http.createServer(async (req, res) => {
     return;
   }
 
+  // Admin panel UI — a single static HTML file, gated by the secret you
+  // enter inside the page itself (sent as a header on every API call).
+  if (req.method === 'GET' && req.url === '/admin') {
+    const filePath = path.join(__dirname, 'admin-panel.html');
+    fs.readFile(filePath, 'utf8', (err, content) => {
+      if (err) return sendJson(res, 500, { error: 'admin-panel.html not found' });
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(content);
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/activate') {
     const { key, deviceId } = await readBody(req);
     if (!key || !deviceId) return sendJson(res, 400, { valid: false, reason: 'Missing key or deviceId' });
-    return sendJson(res, 200, licensing.activate(key, deviceId));
+    return sendJson(res, 200, licensing.activate(key, deviceId, getClientIp(req)));
   }
 
   if (req.method === 'POST' && req.url === '/api/verify') {
     const { key, deviceId } = await readBody(req);
     if (!key || !deviceId) return sendJson(res, 400, { valid: false, reason: 'Missing key or deviceId' });
-    return sendJson(res, 200, licensing.verify(key, deviceId));
+    return sendJson(res, 200, licensing.verify(key, deviceId, getClientIp(req)));
   }
 
-  // Admin-only: generate a new key after a sale. Protected by a secret
-  // header so random visitors can't mint their own keys.
+  // Everything below here is admin-only, protected by the x-admin-key header.
+  if (req.url.startsWith('/api/generate-key') || req.url.startsWith('/api/keys') ||
+      req.url.startsWith('/api/revoke-device') || req.url.startsWith('/api/edit-key') ||
+      req.url.startsWith('/api/delete-key')) {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'Unauthorized' });
+  }
+
   if (req.method === 'POST' && req.url === '/api/generate-key') {
-    if (req.headers['x-admin-key'] !== licensing.ADMIN_SECRET) {
-      return sendJson(res, 401, { error: 'Unauthorized' });
-    }
-    const { maxActivations, expiresAt } = await readBody(req);
-    const key = licensing.createKey(maxActivations || 2, expiresAt || null);
+    const { maxActivations, expiresAt, label } = await readBody(req);
+    const key = licensing.createKey(maxActivations || 2, expiresAt || null, label || '');
     return sendJson(res, 200, { key });
+  }
+
+  if (req.method === 'GET' && req.url === '/api/keys') {
+    return sendJson(res, 200, { keys: licensing.listKeys() });
+  }
+
+  if (req.method === 'POST' && req.url === '/api/revoke-device') {
+    const { key, deviceId } = await readBody(req);
+    return sendJson(res, 200, licensing.revokeDevice(key, deviceId));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/edit-key') {
+    const { key, maxActivations, expiresAt, label } = await readBody(req);
+    return sendJson(res, 200, licensing.editKey(key, { maxActivations, expiresAt, label }));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/delete-key') {
+    const { key } = await readBody(req);
+    return sendJson(res, 200, licensing.deleteKey(key));
   }
 
   sendJson(res, 404, { error: 'Not found' });
