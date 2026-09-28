@@ -85,6 +85,49 @@
   .usage-fill { height: 100%; background: #4f7cff; }
   .device-row td { background: #0e1322; font-size: 12px; color: #cdd6ee; }
   .device-row .ip { font-family: monospace; }
+  .device-line {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 0;
+    border-bottom: 1px solid #1c2438;
+    flex-wrap: wrap;
+  }
+  .panel-heading {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #7c88ab;
+    margin-bottom: 6px;
+  }
+  .group-input {
+    width: 150px;
+    padding: 5px 8px;
+    font-size: 12px;
+  }
+  .trust-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: #9aa5c0;
+    cursor: pointer;
+  }
+  .trust-toggle { width: auto; accent-color: #4fd18b; }
+  .role-select, .new-member-role {
+    background: #0b0e17;
+    border: 1px solid #2c3550;
+    border-radius: 6px;
+    padding: 5px 8px;
+    color: #fff;
+    font-size: 12px;
+  }
+  .add-member-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    align-items: center;
+  }
+  .new-member-email { width: 220px; }
   .expand-btn { cursor: pointer; color: #4f7cff; font-size: 12px; background: none; border: none; padding: 0; }
   .hidden { display: none; }
   .small-btn { padding: 5px 10px; font-size: 11px; }
@@ -241,6 +284,7 @@ function renderKeys(keys) {
   keys.forEach((k) => {
     const used = k.activations.length;
     const pct = Math.min(100, (used / k.maxActivations) * 100);
+    const memberCount = (k.members || []).length;
 
     const row = document.createElement('tr');
     row.innerHTML = `
@@ -260,17 +304,55 @@ function renderKeys(keys) {
     const deviceRow = document.createElement('tr');
     deviceRow.className = 'device-row hidden';
     deviceRow.dataset.forKey = k.key;
+
     const deviceRows = k.activations.length
       ? k.activations.map((a) => `
-          <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #1c2438;">
+          <div class="device-line">
             <span>Device: <code>${a.deviceId}</code></span>
             <span class="ip">IP: ${a.ip || 'unknown'}</span>
-            <span>Activated: ${fmtDate(a.activatedAt)}</span>
+            <input class="group-input" placeholder="Group (e.g. Support)" value="${a.group || ''}"
+                   data-key="${k.key}" data-device="${a.deviceId}" />
+            <label class="trust-label">
+              <input type="checkbox" class="trust-toggle" ${a.trusted ? 'checked' : ''}
+                     data-key="${k.key}" data-device="${a.deviceId}" />
+              Trusted (unattended)
+            </label>
             <button class="danger small-btn" data-revoke-key="${k.key}" data-revoke-device="${a.deviceId}">Revoke</button>
           </div>
         `).join('')
       : '<div style="color:#7c88ab;">No devices activated yet.</div>';
-    deviceRow.innerHTML = `<td colspan="7">${deviceRows}</td>`;
+
+    const memberRows = (k.members || []).length
+      ? k.members.map((m) => `
+          <div class="device-line">
+            <span>${m.email}</span>
+            <select class="role-select" data-key="${k.key}" data-email="${m.email}">
+              <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>Admin</option>
+              <option value="member" ${m.role === 'member' ? 'selected' : ''}>Member</option>
+              <option value="viewer" ${m.role === 'viewer' ? 'selected' : ''}>Viewer</option>
+            </select>
+            <button class="danger small-btn" data-remove-member-key="${k.key}" data-remove-member-email="${m.email}">Remove</button>
+          </div>
+        `).join('')
+      : '<div style="color:#7c88ab;">No team members added yet.</div>';
+
+    deviceRow.innerHTML = `
+      <td colspan="7">
+        <div class="panel-heading">Devices</div>
+        ${deviceRows}
+        <div class="panel-heading" style="margin-top:14px;">Team members (${memberCount})</div>
+        ${memberRows}
+        <div class="add-member-row">
+          <input class="new-member-email" type="email" placeholder="email@company.com" data-key="${k.key}" />
+          <select class="new-member-role" data-key="${k.key}">
+            <option value="admin">Admin</option>
+            <option value="member" selected>Member</option>
+            <option value="viewer">Viewer</option>
+          </select>
+          <button class="secondary small-btn add-member-btn" data-key="${k.key}">Add Member</button>
+        </div>
+      </td>
+    `;
     tbody.appendChild(deviceRow);
   });
 
@@ -295,6 +377,83 @@ function renderKeys(keys) {
         loadKeys();
       } catch (err) {
         alert('Failed to update: ' + err.message);
+      }
+    });
+  });
+
+  tbody.querySelectorAll('.group-input').forEach((input) => {
+    input.addEventListener('change', async () => {
+      try {
+        await apiCall('/api/set-group', {
+          method: 'POST',
+          body: JSON.stringify({ key: input.dataset.key, deviceId: input.dataset.device, group: input.value }),
+        });
+      } catch (err) {
+        alert('Failed to update group: ' + err.message);
+      }
+    });
+  });
+
+  tbody.querySelectorAll('.trust-toggle').forEach((checkbox) => {
+    checkbox.addEventListener('change', async () => {
+      try {
+        await apiCall('/api/set-trust', {
+          method: 'POST',
+          body: JSON.stringify({
+            key: checkbox.dataset.key,
+            deviceId: checkbox.dataset.device,
+            trusted: checkbox.checked,
+          }),
+        });
+      } catch (err) {
+        alert('Failed to update trust: ' + err.message);
+        checkbox.checked = !checkbox.checked;
+      }
+    });
+  });
+
+  tbody.querySelectorAll('.role-select').forEach((select) => {
+    select.addEventListener('change', async () => {
+      try {
+        await apiCall('/api/edit-member', {
+          method: 'POST',
+          body: JSON.stringify({ key: select.dataset.key, email: select.dataset.email, role: select.value }),
+        });
+      } catch (err) {
+        alert('Failed to update role: ' + err.message);
+      }
+    });
+  });
+
+  tbody.querySelectorAll('.add-member-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.key;
+      const emailInput = tbody.querySelector(`.new-member-email[data-key="${key}"]`);
+      const roleSelect = tbody.querySelector(`.new-member-role[data-key="${key}"]`);
+      const email = emailInput.value.trim();
+      if (!email) return;
+      try {
+        await apiCall('/api/add-member', {
+          method: 'POST',
+          body: JSON.stringify({ key, email, role: roleSelect.value }),
+        });
+        loadKeys();
+      } catch (err) {
+        alert('Failed to add member: ' + err.message);
+      }
+    });
+  });
+
+  tbody.querySelectorAll('[data-remove-member-key]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        await apiCall('/api/remove-member', {
+          method: 'POST',
+          body: JSON.stringify({ key: btn.dataset.removeMemberKey, email: btn.dataset.removeMemberEmail }),
+        });
+        loadKeys();
+      } catch (err) {
+        alert('Failed to remove member: ' + err.message);
       }
     });
   });

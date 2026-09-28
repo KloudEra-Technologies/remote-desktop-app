@@ -35,7 +35,10 @@ function createKey(maxActivations = 2, expiresAt = null, label = '') {
   keys[key] = {
     label,
     maxActivations,
-    activations: [], // [{ deviceId, ip, activatedAt }]
+    // [{ deviceId, ip, activatedAt, lastSeenAt, group, trusted }]
+    activations: [],
+    // [{ email, role }] — role: 'admin' | 'member' | 'viewer'
+    members: [],
     createdAt: Date.now(),
     expiresAt, // null = never expires
   };
@@ -63,7 +66,10 @@ function activate(key, deviceId, ip) {
   if (entry.activations.length >= entry.maxActivations) {
     return { valid: false, reason: 'Activation limit reached for this key' };
   }
-  entry.activations.push({ deviceId, ip, activatedAt: Date.now(), lastSeenAt: Date.now() });
+  entry.activations.push({
+    deviceId, ip, activatedAt: Date.now(), lastSeenAt: Date.now(),
+    group: '', trusted: false,
+  });
   writeKeys(keys);
   return { valid: true };
 }
@@ -116,10 +122,82 @@ function deleteKey(key) {
   return { ok: true };
 }
 
-// Returns every key with its full activation list, for the admin panel.
+// Returns every key with its full activation + member list, for the admin panel.
 function listKeys() {
   const keys = readKeys();
   return Object.entries(keys).map(([key, data]) => ({ key, ...data }));
+}
+
+// ---------- Access management additions ----------
+
+// Marks a device as "trusted" — future connection requests FROM this
+// device skip the host's confirm dialog (unattended access).
+function setDeviceTrust(key, deviceId, trusted) {
+  const keys = readKeys();
+  const entry = keys[key];
+  if (!entry) return { ok: false, reason: 'Key not found' };
+  const device = entry.activations.find((a) => a.deviceId === deviceId);
+  if (!device) return { ok: false, reason: 'Device not found' };
+  device.trusted = !!trusted;
+  writeKeys(keys);
+  return { ok: true };
+}
+
+// Tags a device with a free-text group/department label (e.g. "Support").
+function setDeviceGroup(key, deviceId, group) {
+  const keys = readKeys();
+  const entry = keys[key];
+  if (!entry) return { ok: false, reason: 'Key not found' };
+  const device = entry.activations.find((a) => a.deviceId === deviceId);
+  if (!device) return { ok: false, reason: 'Device not found' };
+  device.group = group || '';
+  writeKeys(keys);
+  return { ok: true };
+}
+
+// Called by a HOST app at connection time: is the connecting deviceId
+// trusted under the host's own license key? No admin secret required —
+// a host only ever checks trust under the key it itself activated with.
+function checkTrust(key, deviceId) {
+  const keys = readKeys();
+  const entry = keys[key];
+  if (!entry) return { trusted: false };
+  const device = entry.activations.find((a) => a.deviceId === deviceId);
+  return { trusted: !!(device && device.trusted), group: device ? device.group : '' };
+}
+
+// ---------- Team members (organizational record, not yet full login auth) ----------
+
+function addMember(key, email, role = 'member') {
+  const keys = readKeys();
+  const entry = keys[key];
+  if (!entry) return { ok: false, reason: 'Key not found' };
+  if (entry.members.some((m) => m.email === email)) {
+    return { ok: false, reason: 'Member already added' };
+  }
+  entry.members.push({ email, role });
+  writeKeys(keys);
+  return { ok: true };
+}
+
+function removeMember(key, email) {
+  const keys = readKeys();
+  const entry = keys[key];
+  if (!entry) return { ok: false, reason: 'Key not found' };
+  entry.members = entry.members.filter((m) => m.email !== email);
+  writeKeys(keys);
+  return { ok: true };
+}
+
+function editMemberRole(key, email, role) {
+  const keys = readKeys();
+  const entry = keys[key];
+  if (!entry) return { ok: false, reason: 'Key not found' };
+  const member = entry.members.find((m) => m.email === email);
+  if (!member) return { ok: false, reason: 'Member not found' };
+  member.role = role;
+  writeKeys(keys);
+  return { ok: true };
 }
 
 module.exports = {
@@ -130,5 +208,11 @@ module.exports = {
   editKey,
   deleteKey,
   listKeys,
+  setDeviceTrust,
+  setDeviceGroup,
+  checkTrust,
+  addMember,
+  removeMember,
+  editMemberRole,
   ADMIN_SECRET,
 };

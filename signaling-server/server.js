@@ -87,7 +87,9 @@ const httpServer = http.createServer(async (req, res) => {
   // Everything below here is admin-only, protected by the x-admin-key header.
   if (req.url.startsWith('/api/generate-key') || req.url.startsWith('/api/keys') ||
       req.url.startsWith('/api/revoke-device') || req.url.startsWith('/api/edit-key') ||
-      req.url.startsWith('/api/delete-key')) {
+      req.url.startsWith('/api/delete-key') || req.url.startsWith('/api/set-trust') ||
+      req.url.startsWith('/api/set-group') || req.url.startsWith('/api/add-member') ||
+      req.url.startsWith('/api/remove-member') || req.url.startsWith('/api/edit-member')) {
     if (!isAdmin(req)) return sendJson(res, 401, { error: 'Unauthorized' });
   }
 
@@ -114,6 +116,38 @@ const httpServer = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/delete-key') {
     const { key } = await readBody(req);
     return sendJson(res, 200, licensing.deleteKey(key));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/set-trust') {
+    const { key, deviceId, trusted } = await readBody(req);
+    return sendJson(res, 200, licensing.setDeviceTrust(key, deviceId, trusted));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/set-group') {
+    const { key, deviceId, group } = await readBody(req);
+    return sendJson(res, 200, licensing.setDeviceGroup(key, deviceId, group));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/add-member') {
+    const { key, email, role } = await readBody(req);
+    return sendJson(res, 200, licensing.addMember(key, email, role));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/remove-member') {
+    const { key, email } = await readBody(req);
+    return sendJson(res, 200, licensing.removeMember(key, email));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/edit-member') {
+    const { key, email, role } = await readBody(req);
+    return sendJson(res, 200, licensing.editMemberRole(key, email, role));
+  }
+
+  // Called by a HOST app (not admin-gated — a host only ever checks trust
+  // under the license key it itself activated with).
+  if (req.method === 'POST' && req.url === '/api/check-trust') {
+    const { key, deviceId } = await readBody(req);
+    return sendJson(res, 200, licensing.checkTrust(key, deviceId));
   }
 
   sendJson(res, 404, { error: 'Not found' });
@@ -160,13 +194,21 @@ wss.on('connection', (ws) => {
           send(ws, { type: 'error', message: 'Device not found or offline' });
           return;
         }
-        send(target, { type: 'incoming-request', fromId: myId });
+        // machineId (persistent, license-bound) and mode ('control'/'view')
+        // are passed through so the host can check its trust list and
+        // honor the requested access level.
+        send(target, {
+          type: 'incoming-request',
+          fromId: myId,
+          machineId: msg.machineId || null,
+          mode: msg.mode || 'control',
+        });
         break;
       }
 
       case 'connect-accept': {
         const target = peers.get(msg.targetId);
-        send(target, { type: 'request-accepted', fromId: myId });
+        send(target, { type: 'request-accepted', fromId: myId, mode: msg.mode || 'control' });
         break;
       }
 
