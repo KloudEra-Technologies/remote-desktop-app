@@ -114,6 +114,26 @@ header {
   justify-content: space-between;
 }
 .brand { display: flex; align-items: center; gap: 10px; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.license-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: rgba(79, 209, 139, 0.12);
+  border: 1px solid rgba(79, 209, 139, 0.35);
+  font-size: 12px;
+  font-weight: 600;
+  color: #4fd18b;
+}
+.license-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4fd18b;
+  box-shadow: 0 0 6px 1px rgba(79, 209, 139, 0.7);
+}
 .brand-dot {
   width: 10px; height: 10px; border-radius: 50%;
   background: #4f7cff;

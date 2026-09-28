@@ -4,7 +4,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 // Use https:// here (not wss://) — this is a plain HTTP API on the same server.
-const LICENSE_API_URL = 'https://signaling-server-rzbl.onrender.com';
+const LICENSE_API_URL = 'https://signaling-server-v0nm.onrender.com';
 
 const LICENSE_FILE = path.join(app.getPath('userData'), 'license.json');
 const MACHINE_ID_FILE = path.join(app.getPath('userData'), 'machine-id.txt');
@@ -166,4 +166,10 @@ ipcMain.handle('activate-license', async (e, { licenseKey }) => {
   } catch (err) {
     return { valid: false, reason: 'Could not reach the license server. Check your internet connection.' };
   }
+});
+
+// ---- IPC: expose current license status to the renderer (for the badge) ----
+ipcMain.handle('get-license-info', () => {
+  const stored = readStoredLicense();
+  return stored && stored.key ? { key: stored.key } : null;
 });

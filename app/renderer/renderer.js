@@ -276,6 +276,17 @@ function log(msg) {
   document.getElementById('log').textContent = msg;
 }
 
+async function showLicenseBadge() {
+  const info = await window.hostAPI.getLicenseInfo();
+  if (!info || !info.key) return; // shouldn't normally happen — main.js already gates this page
+  const badge = document.getElementById('license-badge');
+  const label = document.getElementById('license-badge-text');
+  const last4 = info.key.slice(-4);
+  label.textContent = `Licensed · ${last4}`;
+  badge.title = `Activated with key ending in ${last4}`;
+  badge.classList.remove('hidden');
+}
+
 function requestConnect(targetId) {
   if (!targetId) return;
   peerId = targetId;
@@ -293,6 +304,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   renderHistory();
   await connectSignaling();
+  await showLicenseBadge();
 
   document.getElementById('connect-btn').addEventListener('click', () => {
     const targetId = document.getElementById('target-id').value.trim().toUpperCase();
